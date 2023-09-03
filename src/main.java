@@ -110,7 +110,11 @@ public class main {
                     if(status == "success"){
                         socketInfo.auth = auth_token;
                         socketInfo.isAuthorized = true;
-                        return StringToPacket("auth " + auth_token);
+                        try {
+                            socketInfo.socket.getOutputStream().write(StringToPacket("auth " + auth_token));
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
                     }
                 }else{
                     status = "failed";
@@ -163,7 +167,11 @@ public class main {
                     }
                     System.out.println("[DEBUG] Chat creation attempt: " + status);
                     if(status == "success"){
-                        return StringToPacket("new_chat " + chat_id);
+                        try {
+                            socketInfo.socket.getOutputStream().write(StringToPacket("new_chat " + chat_id));
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
                     }
                 }else{
                     status = "failed";
@@ -187,7 +195,9 @@ public class main {
                     }
                     System.out.println("[DEBUG] Chat deletion attempt: " + status);
                     if(status == "success"){
-                        return StringToPacket("new_chat " + chat_id);
+                        for(String member_name : DB.chats.get(GetChatById(chat_id)).members){
+                            SendToAllSockets(GetAuthByUsername(member_name), "remove_chat " + chat_id);
+                        }
                     }
                 }else{
                     status = "failed";
@@ -214,6 +224,9 @@ public class main {
                     }else if(st == "-4011"){
                         status = "failed";
                     }
+                    if(status == "success"){
+                        SendToAllSockets(GetAuthByUsername(member_name),"new_chat " + chat_id);
+                    }
                     System.out.println("[DEBUG] Add member attempt: " + status);
                 }else{
                     status = "failed";
@@ -239,6 +252,9 @@ public class main {
                         status = "failed";
                     }else if(st == "-4011"){
                         status = "failed";
+                    }
+                    if(status == "success"){
+                        SendToAllSockets(GetAuthByUsername(member_name),"member_delete " + chat_id);
                     }
                     System.out.println("[DEBUG] Remove member attempt: " + status);
                 }else{
@@ -291,6 +307,7 @@ public class main {
         int chat_index = GetChatById(chat_id);
         if(chat_index == -1) return "-4042";
         if(!DB.chats.get(chat_index).members.contains(username)) return "-4031";
+        DB.chats.get(chat_index).chat_history.add(0, new String[]{username, message});
         for(int i = 0; i < DB.chats.get(chat_index).members.size();i++){
             String member_auth = GetAuthByUsername(DB.chats.get(chat_index).members.get(i));
             SendToAllSockets(member_auth, "new_msg " + chat_id + " " + EncodeBase64(message) + " " + username);
