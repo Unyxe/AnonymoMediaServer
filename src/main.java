@@ -6,6 +6,8 @@ import java.net.*;
 
 public class main {
     static Random rn = new Random();
+
+    static int max_messages_per_page = 50;
     public static void main(String[] args) throws IOException {
 
         String http_resp_headers =
@@ -168,7 +170,7 @@ public class main {
                     System.out.println("[DEBUG] Chat creation attempt: " + status);
                     if(status == "success"){
                         try {
-                            socketInfo.socket.getOutputStream().write(StringToPacket("new_chat " + chat_id));
+                            socketInfo.socket.getOutputStream().write(StringToPacket("new_chat " + GetEncodedChat(chat_id)));
                         } catch (IOException e) {
                             throw new RuntimeException(e);
                         }
@@ -218,6 +220,8 @@ public class main {
                     if(st == "-4041"){
                         status = "failed";
                     } else if(st == "-4042"){
+                        status = "failed";
+                    }else if(st == "-4043"){
                         status = "failed";
                     }else if(st == "-4031"){
                         status = "failed";
@@ -280,7 +284,102 @@ public class main {
                     }else if(st == "-4031"){
                         status = "failed";
                     }
+
                     System.out.println("[DEBUG] Send message attempt: " + status);
+                }else{
+                    status = "failed";
+                }
+            }
+            break;
+            case "get_chats":
+            {
+                if(!socketInfo.isAuthorized) {
+                    status = "not_authorized";
+                    break root_switch;
+                }
+                if(packet_spl.length == 1){
+                    String auth = socketInfo.auth;
+                    String chats_encoded = GetChatsForMemberEncoded(auth);
+                    if(chats_encoded == "-4041"){
+                        status = "failed";
+                    }
+                    if(status == "success"){
+                        try {
+                            socketInfo.socket.getOutputStream().write(StringToPacket("chats_response " + chats_encoded));
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                    System.out.println("[DEBUG] Chats request attempt: " + status);
+                }else{
+                    status = "failed";
+                }
+            }
+            break;
+            case "get_messages":
+            {
+                if(!socketInfo.isAuthorized) {
+                    status = "not_authorized";
+                    break root_switch;
+                }
+                if(packet_spl.length == 3){
+                    String auth = socketInfo.auth;
+                    String chat_id = packet_spl[1];
+                    int page = -1;
+                    try {
+                        page = Integer.parseInt(packet_spl[2]);
+                    }catch(Exception e){
+                        status ="failed";
+                        break root_switch;
+                    }
+                    String messages_encoded = GetChatHistoryPageEncoded(auth, chat_id, page);
+                    if(messages_encoded == "-4041"){
+                        status = "failed";
+                    } else if(messages_encoded == "-4042"){
+                        status = "failed";
+                    }else if(messages_encoded == "-4031"){
+                        status = "failed";
+                    } else if(messages_encoded == "-5001"){
+                        status = "failed";
+                    }
+                    if(status == "success"){
+                        try {
+                            socketInfo.socket.getOutputStream().write(StringToPacket("messages_response " + messages_encoded + " " + chat_id));
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                    System.out.println("[DEBUG] Message history request attempt: " + status);
+                }else{
+                    status = "failed";
+                }
+            }
+            break;
+            case "get_members":
+            {
+                if(!socketInfo.isAuthorized) {
+                    status = "not_authorized";
+                    break root_switch;
+                }
+                if(packet_spl.length == 2){
+                    String auth = socketInfo.auth;
+                    String chat_id = packet_spl[1];
+                    String members_encoded = GetMembersForChatEncoded(auth, chat_id);
+                    if(members_encoded == "-4041"){
+                        status = "failed";
+                    } else if(members_encoded == "-4042"){
+                        status = "failed";
+                    }else if(members_encoded == "-4031"){
+                        status = "failed";
+                    }
+                    if(status == "success"){
+                        try {
+                            socketInfo.socket.getOutputStream().write(StringToPacket("members_response " + members_encoded + " " + chat_id));
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                    System.out.println("[DEBUG] Chat's members request attempt: " + status);
                 }else{
                     status = "failed";
                 }
@@ -300,6 +399,50 @@ public class main {
 
 
 
+    static String GetChatHistoryPageEncoded(String auth, String chat_id, int page){
+        int user_index = GetUserByAuth(auth);
+        if(user_index == -1) return "-4041";
+        String username = DB.users.get(user_index)[0];
+        int chat_index = GetChatById(chat_id);
+        if(chat_index == -1) return "-4042";
+        Chat chat = DB.chats.get(chat_index);
+        if(!chat.members.contains(username)) return "-4031";
+        if(page*max_messages_per_page > chat.chat_history.size()-1) return "-5001";
+        ArrayList<String[]> messages = new ArrayList<>();
+        int m = (page+1)*max_messages_per_page;
+        if(m > chat.chat_history.size()){
+            m = chat.chat_history.size();
+        }
+
+        for(int i = page*max_messages_per_page; i < m;i++){
+            messages.add(i, chat.chat_history.get(i));
+        }
+        return GetEncodedMessages(messages.toArray(new String[messages.size()][]));
+    }
+    static String GetMembersForChatEncoded(String auth, String chat_id){
+        int user_index = GetUserByAuth(auth);
+        if(user_index == -1) return "-4041";
+        String username = DB.users.get(user_index)[0];
+        int chat_index = GetChatById(chat_id);
+        if(chat_index == -1) return "-4042";
+        Chat chat = DB.chats.get(chat_index);
+        if(!chat.members.contains(username)) return "-4031";
+
+        return GetEncodedMembers(chat.members.toArray(new String[chat.members.size()]));
+    }
+    static String GetChatsForMemberEncoded(String auth){
+        ArrayList<String> chat_ids = new ArrayList<>();
+        int user_index = GetUserByAuth(auth);
+        if(user_index == -1) return "-4041";
+        String username = DB.users.get(user_index)[0];
+        for(int i = 0 ; i < DB.chats.size();i++){
+            Chat c = DB.chats.get(i);
+            if(c.members.contains(username)){
+                chat_ids.add(c.chat_id);
+            }
+        }
+        return GetEncodedChats(chat_ids.toArray(new String[chat_ids.size()]));
+    }
     static String SendMessage(String auth, String chat_id, String message){
         int user_index = GetUserByAuth(auth);
         if(user_index == -1) return "-4041";
@@ -323,6 +466,7 @@ public class main {
         String chat_owner_username = DB.chats.get(chat_index).owner_username;
         if(chat_owner_username.equals(username)){
             if(DB.chats.get(chat_index).members.contains(member_username)) return "-4011";
+            if(GetAuthByUsername(member_username) == null) return "-4043";
             DB.chats.get(chat_index).members.add(member_username);
         }else{
             return "-4031";
@@ -374,7 +518,7 @@ public class main {
     static String Register(String u, String p){
         for(int i = 0; i < DB.users.size();i++){
             String[] user_info = DB.users.get(i);
-            if(u == user_info[0]){
+            if(u.equals(user_info[0])){
                 return "-1";
             }
         }
@@ -462,6 +606,48 @@ public class main {
             }
         }
         return -1;
+    }
+
+    static String GetEncodedChat(String chat_id){
+        String chat_display_name = DB.chats.get(GetChatById(chat_id)).display_name;
+        return EncodeBase64(chat_id + " " + chat_display_name);
+    }
+
+    static String GetEncodedChats(String[] chat_ids){
+        String d = "";
+        for(int i = 0; i < chat_ids.length;i++){
+            String chat_display_name = DB.chats.get(GetChatById(chat_ids[i])).display_name;
+            d += chat_ids[i] + " " + chat_display_name;
+            if(i == chat_ids.length-1){
+                break;
+            }
+            d += "\n";
+        }
+        return EncodeBase64(d);
+    }
+    static String GetEncodedMembers(String[] member_names){
+        String d = "";
+        for(int i = 0; i < member_names.length;i++){
+            d += member_names[i];
+            if(i == member_names.length-1){
+                break;
+            }
+            d += " ";
+        }
+        return EncodeBase64(d);
+    }
+    static String GetEncodedMessages(String[][] messages){
+        String d = "";
+        for(int i = 0; i < messages.length;i++){
+            String message_body = messages[i][1];
+            String sender = messages[i][0];
+            d += sender + " "+EncodeBase64(message_body);
+            if(i == messages.length-1){
+                break;
+            }
+            d += "\n";
+        }
+        return EncodeBase64(d);
     }
     
     static String DecodeBase64(String s){
